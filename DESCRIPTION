@@ -1,0 +1,31 @@
+Package: bbtcomp
+Title: Bayesian Bradley Terry models to compare multiple algorithms on multiple datasets
+Version: 0.1.0.0
+Authors@R: 
+    person("Jacques", "Wainer", , "wainer@ic.unicamp.br", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0001-5201-1244"))
+Description: Computes a Bayesian Bradley-Terry model for comparing multiple  algorithms on multiple data sets.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.0
+Suggests: 
+    bayesplot,
+    ggplot2,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Imports: 
+    cmdstanr,
+    dplyr,
+    HDInterval,
+    loo,
+    magrittr,
+    parallel,
+    posterior,
+    rlang,
+    testit,
+    tibble,
+    tidyselect
+Depends: 
+    R (>= 2.10)
+LazyData: true

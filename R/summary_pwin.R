@@ -41,7 +41,7 @@ summary_pwin <- function(
                  is.null(control) || (is.character(control) && length(control) == 1) )
 
   if (short && length(columns) == 7) columns <- c("mean","delta", "in.rope")
-  columns <- intersect(c("median", "mean", "low", "high", "delta", "above.50", "in.rope"), columns)
+  columns <- intersect( columns, c("median", "mean", "low", "high", "delta", "above.50", "in.rope"))
   zz <- get_pwin(modout, selected, control)
   nn <- colnames(zz)
   n <- length(nn)

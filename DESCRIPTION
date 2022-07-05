@@ -1,6 +1,6 @@
 Package: bbtcomp
 Title: Bayesian Bradley Terry models to compare multiple algorithms on multiple datasets
-Version: 0.1.0.0
+Version: 0.1.0.1
 Authors@R: 
     person("Jacques", "Wainer", , "wainer@ic.unicamp.br", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0001-5201-1244"))

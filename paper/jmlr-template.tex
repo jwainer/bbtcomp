@@ -1,0 +1,63 @@
+\documentclass[twoside,11pt,preprint]{article}
+
+% Any additional packages needed should be included after jmlr2e.
+% Note that jmlr2e.sty includes epsfig, amssymb, natbib and graphicx,
+% and defines many common macros, such as 'proof' and 'example'.
+%
+% It also sets the bibliographystyle to plainnat; for more information on
+% natbib citation styles, see the natbib documentation, a copy of which
+% is archived at http://www.jmlr.org/format/natbib.pdf
+
+% Available options for package jmlr2e are:
+%
+%   - abbrvbib : use abbrvnat for the bibliography style
+%   - nohyperref : do not load the hyperref package
+%   - preprint : remove JMLR specific information from the template,
+%         useful for example for posting to preprint servers.
+%
+% Example of using the package with custom options:
+%
+% \usepackage[abbrvbib, preprint]{jmlr2e}
+
+\usepackage{jmlr2e}
+
+$header-includes$
+
+% Definitions of handy macros can go here
+
+
+% Heading arguments are {volume}{year}{pages}{date submitted}{date published}{paper id}{author-full-names}
+
+\jmlrheading{1}{2022}{1-48}{4/00}{10/00}{wainer22a}{Jacques Wainer}
+
+% Short headings should be running head and authors last names
+
+\ShortHeadings{$short-title$}{$short-author$}
+\firstpageno{1}
+
+\begin{document}
+
+\title{$title$}
+
+\author{\name $author$ \email $email$\\
+       \addr $addr$
+       }
+
+\editor{}
+
+\maketitle
+
+\begin{abstract}%   <- trailing '%' for backward compatibility of .sty file
+$abstract$
+\end{abstract}
+
+\begin{keywords}
+  $keywords$
+\end{keywords}
+
+$body$
+
+\vskip 0.2in
+\bibliography{$bibliography$}
+
+\end{document}

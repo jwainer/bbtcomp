@@ -1,6 +1,6 @@
 Package: bbtcomp
 Title: Bayesian Bradley Terry models to compare multiple algorithms on multiple datasets
-Version: 0.1.0.1
+Version: 0.3.0
 Authors@R: 
     person("Jacques", "Wainer", , "wainer@ic.unicamp.br", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0001-5201-1244"))
@@ -8,7 +8,6 @@ Description: Computes a Bayesian Bradley-Terry model for comparing multiple  alg
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.2.0
 Suggests: 
     bayesplot,
     ggplot2,
@@ -20,7 +19,6 @@ Imports:
     HDInterval,
     loo,
     magrittr,
-    parallel,
     posterior,
     rlang,
     testit,
@@ -29,3 +27,4 @@ Imports:
 Depends: 
     R (>= 2.10)
 LazyData: true
+RoxygenNote: 7.2.3

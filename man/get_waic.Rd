@@ -7,7 +7,7 @@
 get_waic(mod)
 }
 \arguments{
-\item{mod}{A BBT model (use_log_lik must be set)}
+\item{mod}{A BBT model}
 }
 \value{
 the waic, as computed by the loo package
@@ -17,9 +17,9 @@ Compute the WAIC for the model
 }
 \examples{
 \donttest{
-ss <- ll[1:80, 1:6] # first 20 datasets and 5 algorithms
+ss <- ll[1:80, 1:6] # first 20 data sets and 5 algorithms
 
-m1 <- bbtcomp(ss, use_log_lik = TRUE)
+m1 <- bbtcomp(ss)
 get_waic(m1)
 }
 }

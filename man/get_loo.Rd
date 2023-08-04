@@ -7,7 +7,7 @@
 get_loo(mod)
 }
 \arguments{
-\item{mod}{A BBT model (use_log_lik must be set)}
+\item{mod}{A BBT model}
 }
 \value{
 The loo, as computed by the loo package
@@ -19,7 +19,7 @@ Compute the loo for the model
 \donttest{
 ss <- ll[1:80, 1:6] # first 20 datasets and 5 algorithms
 
-m1 <- bbtcomp(ss, use_log_lik = TRUE)
+m1 <- bbtcomp(ss)
 get_loo(m1)
 }
 }

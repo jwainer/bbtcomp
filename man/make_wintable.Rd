@@ -17,17 +17,17 @@ make_wintable(
 \arguments{
 \item{tabx}{An array or data frame, where lines are data sets and columns are algorithms.
 There are three basic use case.
-* only tabx, and there is a column that contains the name or an id for each data set. The dbcol
+* only \code{tabx}, and there is a column that contains the name or an id for each data set. The dbcol
 parameter indicates this column. In this case, there can be multiple lines for the same
 data set, where the lines are the results on the different folds of the data set. In this case
 the computation of wins and losses can use the local ROPE concept. If the \code{lrope} parameter is true
 then local ROPE will be used. Also, in this case, the algorithm can use the paired version
 of the local ROPE (if all folds for this data set are the same for all algorithms). If the
 \code{paired} parameter is set, the algorithm will use the paired local ROPE
-* tabx and tabsd are given. In this case, local ROPE can be used (if \code{lrope} is TRUE) but not
-the pairde version (\code{paired} is silently ignored). If \code{lrope}
+* \code{tabx} and \code{tabsd} are given. In this case, local ROPE can be used (if \code{lrope} is TRUE) but not
+the paired version (\code{paired} is silently ignored). If \code{lrope}
 is FALSE, \code{tabsd} is silently ignored.
-* only tabx is given and there is no data set column (\code{dbcol} is set ot 0). In this case
+* only \code{tabx} is given and there is no data set column (\code{dbcol} is set to 0). In this case
 local ROPE cannot be used (and \code{lrope} and \code{paired} are silently ignored.)}
 
 \item{tabsd}{A data frame or an array with the standard deviation of the fold measures for each data set and

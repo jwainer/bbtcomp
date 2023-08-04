@@ -1,0 +1,282 @@
+---
+title: "README"
+author: Jacques Wainer
+date: July, 2023
+output: md_document
+---
+
+# A Bayesian Bradley Terry model to compare multiple algorithms on multiple data sets
+
+
+
+## Installation
+
+The `bbtcomp` package require the `cmdstanR` package, which is not in CRAN. So you need to install `cmdstanR` manually, following the steps described in <https://mc-stan.org/cmdstanr/>.
+
+
+
+After `cmdstanR` is installed, install `bbtcomp` by issuing 
+
+```
+# install.packages("remotes")
+remotes::install_github("jwainer/bbtcomp")
+```
+
+```{r x0, echo=F, include=F}
+library(bbtcomp)
+```
+
+## Data format
+
+In general terms, data is organized as a data frame where the rows are
+the data sets and the columns are the algorithms. The column names
+will be used as the names of the algorithms being compared.
+
+There may be a column that does not contain the results of an algorithm in the data sets, but contain an id for each data set. This is called the `dbcol`.  
+
+
+In more details, the data may be:
+
+- a data frame or an array, with no `dbcol`. The column names are the names of the algorithms, and the entry in line $i$ and column $j$ is the measure of some metric of algorithm $j$ on the data set $i$. Usually, the measure is a mean of different evaluations on different test sets. 
+
+- a data frame with a `dbcol` - a column with a string value that identifies the data set name. 
+
+- two matrices, where the column name is the same on both, and where the first matrix contain the mean (across the cross validation) of the measure for each algorithm for each data set, and the second matrix, the standard deviation of the measures (across the cross validation). In this case the algorithm can compute the non-paired version of the local ROPE.
+
+
+The algorithm assumes that the higher the value for the metric the better, as it is with accuracy, AUC, F1 and other metrics. But if the metric refer to an error measure, such as RMSE, MAE, and others, the user should multiply these values by -1 (and therefore higher values - negative but close to 0 - will be better). If the algorithm did not run for that fold, or for that data set, the entry should be `NA`.
+
+The `bbtcomp` package comes with a data set of  the comparison of 17 algorithms on 132 data sets (as described in the paper). The data set is called `ll`
+
+```{r x1, echo=T}
+ll[1:8,]
+```
+
+Let us use a smaller sub-data set
+
+```{r x2, echo=T}
+ss <- ll[1:80, 1:6] # first 20 data sets (4 folds each)  and 5 algorithms
+ss
+```
+
+This data frame corresponds to the second type of data for the bbtcomp algorithm: a data frame with a column that indicates the data set, and potentially multiple measures for each data set (for multiples folds). 
+
+A data frame that corresponds to the first data format is obtained by:
+
+```{r x2a, echo=T}
+library(dplyr)
+ssmean <- ll %>% group_by(db) %>% summarize(across(everything(),.fns = mean))
+ssmean <- ssmean[,-1]
+ssmean
+```
+
+The data is only a single measure for each algoritm (column) and for each data set (implicitly each row). This format does not allow one to use local ROPE (discussed below).
+
+
+
+
+Finally the third format is a pair of data frames, one with the mean measure for each data set and algorithm (the `ssmean` data frame above), and one with the standard deviation of the measures. The second data frame can be computed by:
+
+```{r x2b, echo=T}
+sssd <- ll %>% group_by(db) %>% summarize(across(everything(),.fns = sd))
+sssd <- sssd[,-1]
+sssd
+```
+
+
+## Before you start using bbtcomp
+
+### Running chains in parallel
+
+First, to run the chains in parallel:
+
+```{r y0, echo=T}
+options(mc.cores = parallel::detectCores(logical = FALSE))
+```
+
+If when running the bbtcomp you see the message 
+
+```
+Running MCMC with 4 sequential chains...
+```
+(the key word there is **sequential**)
+it is because you did not set up Stan to run the chains in parallel with the `options` command above.
+
+### Auxiliary folder
+
+
+CmdStan which serve as the interface between bbtcomp and Stan (the MCMC under the hood of bbtcomp) uses files as intemerdiary between the two processes. First, the Bayesian model of BBT is translated into C++ and then compiled and saved into a file. And the sampling process saves the results as .csv files (one per chain). All these files are stored in an auxiliary folder.  
+
+This auxiliary folder can be set using 
+
+```{r y00, echo=T}
+options(bbtcomp.dir = "~/.bbtcomp")
+```
+
+In this case the auxiliary folder is  "~/.bbtcomp". If the folder is not set, than bbtcomp will use a temporary folder which will be deleted as soon as the R session is terminated.
+
+The advantage of setting the auxiliary folder with the `options` is that the compiled Stan program is stored there and there will be no need to compile it in another R session using bbtcomp. The disadvantage is that each call to `bbtcomp` will generate 4 .csv files. The user should erase all these .csv from time to time. 
+
+The advantages and disadvantages of using a temporary folder are the opposite of the fixed auxiliary folder: new compilation of the Stan model will be necessary in each time `bbtcomp` is called in a new R session, but there is no need to delete the .csv files from time to time.
+
+
+## Basic use
+
+Basic bbtcomp operation:
+
+
+```{r y1, echo=T}
+x <- bbtcomp(ss)
+```
+will return a `bbt model` which is a list with 3 components that contains:
+
+- a `cmdstanr` fit model (with the samples)
+
+- a wintable
+
+- a Boolean stating whether the Davidson model was used 
+
+
+Let us plot the results:
+
+```{r y2, echo=T}
+plot_pwin(x)
+``` 
+
+Let us see the results as a table:
+
+```{r y3, echo=T}
+table_pwin(x)
+``` 
+
+Or only the comparisons of the `rf` algorithms with the others
+```{r y4, echo=T}
+table_pwin(x,control='rf')
+``` 
+
+Or other summary of the probability distributions (median, low and high limits of the 95% HDI):
+
+```{r y5, echo=T}
+table_pwin(x, columns = c("median", "low", "high"), hdi=0.95)
+``` 
+
+For the `ssmean` data format (without the dbcol), use 
+```{r y1b, echo=T}
+x2 <- bbtcomp(ssmean, dbcol=0)
+```
+
+For the `ssmean` and `ssds`  data format (without the dbcol), use 
+```{r y1c, echo=T}
+x3 <- bbtcomp(ssmean, sssd)
+```
+
+
+
+### Local ROPE
+
+Although the ss data has 4 entries for each data set, the results on 4 different test sets (4-fold cross validation), the results displayed above compute the mean for each algorithm and data set and perform the BBT on the mean results. 
+
+The paper discusses that using the fold data one can convert some of the victories of one algorithm over another into a tie, because the difference of the means is smaller or much smaller than the variance of the results for the folds. The paper call it a local ROPE, and discusses two different approaches to the local ROPE, when the measures for the folds are paired (the same test set was measured for all algorithms) or not paired (each test set was potentially different for each algorithm).
+
+To use the local ROPE both the paired and not-paired versions:
+```{r y7, echo=T}
+y <- bbtcomp(ss,lrope=T, paired=T) # paired version - default 
+z <- bbtcomp(ss,lrope=T, paired=F) # not paired version 
+``` 
+
+In the case of the ss data in particular, using either version of the local ROPE will not change the number of victories and losses into ties except for one pair of algorithms.
+
+For the other data formats: only the mean data `ssmean` does not allow the computation of the local ROPE. For the mean and standard deviation data (`ssmean` and `ssds`) only the non paired version of local ROPE can be computed. 
+
+
+### Convergence check
+
+Convergence check of the sampling is performed by the `convergence_check` function, which only calls the `cmdstan_diagnose` function from `cmdstan`. 
+
+`cmdstanr` uses a directory to store two important information of the sampling. The fist information is the compiled Stan model. The first time one calls `bbtcomp` the Stan model is compiled and stored in this directory. The directory is set by the `dir` parameter of the `bbtcomp` function, and the default is `.bbtcomp` on the current directory.
+
+The second data stored in the directory are the .csv files with the samples themselves. The default case is to run 4 chains of sampling in parallel, and thus the sampling process generates 4 .csv files with the results of the sampling. The samples themselves are part of the bbt model object returned by `bbtcomp` and this object is passed to the functions that will generate the tables and the graphs. The default for `bbtcomp` is to delete the .csv in the directory since they tend to grow (each call to `bbtcomp` generates 4 new large .csv files). But the convergence check performed by the `cmdstan_diagnose` function reads those files. Therefore, in order to perform the convergence tests one must disable the cleaning of the .csv files
+
+```{r y8, echo=T}
+y <- bbtcomp(ss) 
+convergence_check(y) 
+``` 
+
+
+### Posterior Predictive check
+
+The posterior pretictive checks of the model in relation to the data, can be generated by
+
+```{r y9, echo=T}
+plot_ppc(y) 
+``` 
+
+And the table version if the graphs as 
+
+```{r y10, echo=T}
+table_ppc(y) 
+``` 
+
+### The win/losses table
+
+The table of win and losses (a wintable) for all algorithms can be accessed as the `wintable` component of the model returned by `bbtcomp`. To print the table of victories and losses with the ties explicit (or unprocessed) use:
+
+```{r y11, echo=T}
+table_wintable(y$wintable, which = "pre") 
+``` 
+
+To print the table with the ties processed, use
+
+```{r y12, echo=T}
+table_wintable(y$wintable) 
+``` 
+
+To print both side by side:
+
+```{r y13, echo=T}
+table_wintable(y$wintable, which = "both") 
+``` 
+
+## Python implementation
+
+### Installation
+
+The python implementation needs `cmdstanPy` package, so please install it following the steps described in <https://mc-stan.org/cmdstanpy/>
+
+Download the files in the `python` directory to your current directory. The files are
+
+- bbtcomp.py
+- stan-full.stan
+- ll.csv
+
+`ll.csv` is the `ll` data available in the R package. If you want to read it use:
+
+```{python ww1, echo=T, eval=F, python.reticulate = FALSE}
+import pandas as pd
+ll = pd.read_csv("./ll.csv")
+``` 
+
+If you do not want to use this data, there is no need to download the file.
+
+`bbtcomp.py` and `stan-full.stan` should be in the current directory.
+
+Then issue:
+
+```{python ww2, echo=T, eval=F, python.reticulate = FALSE}
+import bbtcomp
+``` 
+
+### Using the python implementation
+
+The python file only implements two of the R package functions
+
+- `bbtcomp`(data)
+
+- `table_pwin`(model)
+
+`bbtcomp` has the same parameters, data formats and so on, as the R counterpart. But
+
+- to indicate that there is no `dbcol` use `dbcol=None` or `dbcol=-1`
+
+- to control the auxiliary folder, set the parameter `output_dir` to the auxiliary folder. If left unset, bbtcomp will use a temporary folder which will be deleted as soon as the python session is terminated.
+

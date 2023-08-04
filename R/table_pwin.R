@@ -5,11 +5,11 @@
 #' @param control An algorithm name, to be seen as the control. Only the
 #'       probabilities of the other algorithms against the control will be
 #'       printed
-#' @param short Print only the short summary (above.50 and in.rope)
-#' @param rope Thelow and the high values of ROPE
+#' @param short Print only the short summary (mean, delta, above.50 and in.rope)
+#' @param rope The low and the high values of ROPE
 #' @param columns Which columns to print in the summary
 #' @param hdi HDI for the low/high  and delta  columns in the summary
-#' @param ndigits Number of digits to print the probabilties
+#' @param ndigits Number of digits to print the probabilities
 #'
 #' @return A data.frame
 #' @export
@@ -17,11 +17,12 @@
 #' @examples
 #' \donttest{
 #' m1 = bbtcomp(ll)
-#' summary_pwin(m1, control = "rf", columns = c("median","delta","in.rope"))
-#' summary_pwin(m1, selected = c("svm","lda","gbm","passive"), rope = c(0.48, 0.52))
-#' summary_pwin(m1, short = FALSE, hdi = 0.95)
+#' table_pwin(m1, control = "rf", columns = c("median","delta","in.rope"))
+#' table_pwin(m1, selected = c("svm","lda","gbm","passive"), rope = c(0.48, 0.52))
+#' table_pwin(m1, short = FALSE, hdi = 0.95)
+#' table_pwin(m1, columns = c("mean","low", "high"), hdi = 0.90)
 #' }
-summary_pwin <- function(
+table_pwin <- function(
     modout,
     selected = NULL,
     control = NULL,
@@ -40,7 +41,7 @@ summary_pwin <- function(
   testit::assert("control must be an alg name",
                  is.null(control) || (is.character(control) && length(control) == 1) )
 
-  if (short && length(columns) == 7) columns <- c("mean","delta", "in.rope")
+  if (short && length(columns) == 7) columns <- c("mean","delta", "above.50", "in.rope")
   columns <- intersect( columns, c("median", "mean", "low", "high", "delta", "above.50", "in.rope"))
   zz <- get_pwin(modout, selected, control)
   nn <- colnames(zz)

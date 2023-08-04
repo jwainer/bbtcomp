@@ -9,10 +9,10 @@
 #' @examples
 #' \donttest{
 #' m1 = bbtcomp(ll, lrope = FALSE, deal_with_ties = "davidson")
-#' ppc(m1)
-#' ppc(m1, maxshow = 30)
+#' plot_ppc(m1)
+#' plot_ppc(m1, maxshow = 30)
 #' }
-ppc <- function(modout,
+plot_ppc <- function(modout,
                 maxshow = 20) {
 
   testit::assert("modout must be a BBT model",

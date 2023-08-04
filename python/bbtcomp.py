@@ -4,11 +4,11 @@
     The program requires cmdstanpy as an interface to Stan.
     Find it how to install it at  https://mc-stan.org/cmdstanpy/
 
-    VERSION = 0.2.0.0
+    VERSION = 0.3.0
 
 """
 
-
+import os
 import numpy as np
 import pandas as pd
 import cmdstanpy
@@ -24,6 +24,9 @@ def allpairs(n):
 
 class Wintable():
     def print(self):
+        """
+        Generate a DataFrame with the names of two algorithms, the number of wins for each algorithm, and return it.
+        """
         name1 = np.array(self.alg_names)[self.table[:, 0]]
         name2 = np.array(self.alg_names)[self.table[:, 1]]
         return pd.DataFrame({"alg1": name1, "alg2": name2,
@@ -47,7 +50,7 @@ def bbtcomp(dat,
             paired=True,
             lrope_value=0.4,
             deal_with_ties="s",
-            use_log_lik=False):
+            **kwargs):
     """bbtcomp: generate a bbt model
 
     This is the main function in the package. It generates a BBTmodel
@@ -81,22 +84,18 @@ def bbtcomp(dat,
         Local ROPE can only be calculated
         if either there is fold information (and thus a dbcol column) or the
         datasd information. If local ROPE cannot
-        be conputed, this parameter will be silently ingnored.
+        be conputed, this parameter will be silently ignored.
 
     paired: bol
         Whether to use the paired version of the local ROPE. Only possible is
         dbcol is present. Silently ingored otherwise.
 
     deal_with_ties: str in ["s", "a", "f", "d"]
-        How to deal with thies.
+        How to deal with ties.
         -  a: add
         -  s: spread (default)
         -  f: forget
         -  d: use Davidson model
-
-    use_log_lik: bol
-        Whether to compute the log likelihood of the model
-        (to compute the WAIC or loo).
 
 
     Returns
@@ -110,14 +109,10 @@ def bbtcomp(dat,
         use_davidson = True
     else:
         use_davidson = False
-    if use_davidson or use_log_lik:
-        simplified = False
-    else:
-        simplified = True
-
+    
     w = makewintable(dat, datasd, dbcol, lrope, paired, lrope_value,
                      deal_with_ties)
-    mod = mcmcbbt(w, simplified, use_davidson, use_log_lik)
+    mod = mcmcbbt(w, use_davidson, **kwargs)                 )
     return mod
 
 
@@ -216,10 +211,8 @@ def proc_ties(out, deal_with_ties):
 #
 
 
-def mcmcbbt(win, simplified=True,
-            use_davidson=False,
-            use_log_lik=False):
-
+def mcmcbbt(win, use_davidson=False, **kwargs):
+      
     tab = win.table
     N = tab.shape[0]
     K = len(win.alg_names)
@@ -229,30 +222,25 @@ def mcmcbbt(win, simplified=True,
                 win1=tab[:, 2],
                 win2=tab[:, 3])
 
-    if simplified:
-        mod_file = "./bbt-simplified.stan"
-    else:
-        mod_file = "./bbt-full.stan"
-        data.update(dict(use_davidson=int(use_davidson),
-                         use_log_lik=int(use_log_lik),
+    mod_file = "./bbt-full.stan"
+    data.update(dict(use_davidson=int(use_davidson),
                          ties=tab[:, 4]))
 
     mod = cmdstanpy.CmdStanModel(stan_file=mod_file)
-    fit = mod.sample(data=data)
+    fit = mod.sample(data=data, **kwargs)
 
     obj = BBTmodel()
     obj.model = fit
     obj.davidson = use_davidson
-    obj.log_lok = use_log_lik
     obj.wintable = win
     return obj
 
 #
-# summary_pwin
+# table_pwin
 #
 
 
-def summary_pwin(modout,
+def table_pwin(modout,
                  control=None,
                  selected=None,
                  short=True,
@@ -338,7 +326,7 @@ def get_pwin(mod, control=None, selected=None):
 #
 
 
-def ppc_summary(mod):
+def table_ppc(mod):
 
     tab = mod.wintable.table
     y = tab[:, 2]

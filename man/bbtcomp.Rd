@@ -13,27 +13,25 @@ bbtcomp(
   lrope_value = 0.4,
   paired = TRUE,
   deal_with_ties = c("spread", "forget", "davidson", "add", "random"),
-  use_log_lik = NULL,
-  hyper_prior = 0,
-  scale = 0.5,
-  dir = NULL,
+  hyper_prior = NULL,
+  scale = NULL,
   ...
 )
 }
 \arguments{
 \item{tabx}{An array or data frame, where lines are data sets and columns are algorithms.
 There are three basic use case.
-* only tabx, and there is a column that contains the name or an id for each data set. The dbcol
+* only \code{tabx}, and there is a column that contains the name or an id for each data set. The dbcol
 parameter indicates this column. In this case, there can be multiple lines for the same
 data set, where the lines are the results on the different folds of the data set. In this case
 the computation of wins and losses can use the local ROPE concept. If the \code{lrope} parameter is true
 then local ROPE will be used. Also, in this case, the algorithm can use the paired version
 of the local ROPE (if all folds for this data set are the same for all algorithms). If the
 \code{paired} parameter is set, the algorithm will use the paired local ROPE
-* tabx and tabsd are given. In this case, local ROPE can be used (if \code{lrope} is TRUE) but not
-the pairde version (\code{paired} is silently ignored). If \code{lrope}
+* \code{tabx} and \code{tabsd} are given. In this case, local ROPE can be used (if \code{lrope} is TRUE) but not
+the paired version (\code{paired} is silently ignored). If \code{lrope}
 is FALSE, \code{tabsd} is silently ignored.
-* only tabx is given and there is no data set column (\code{dbcol} is set ot 0). In this case
+* only \code{tabx} is given and there is no data set column (\code{dbcol} is set to 0). In this case
 local ROPE cannot be used (and \code{lrope} and \code{paired} are silently ignored.)}
 
 \item{tabsd}{A data frame or an array with the standard deviation of the fold measures for each data set and
@@ -55,27 +53,25 @@ not be used to compute wins and losses,}
 - random: add each tie randomly to one of the algorithms.
 - davidson: do nothing with the ties. TO be used with the Davidson Bayesian model.}
 
-\item{use_log_lik}{Whether to compute the log likelihood for each data
-in order to compute the WAIC and loo of the model}
-
 \item{hyper_prior}{The code of the hyper-prior for the sigma
-* 0 = lognormal(0.5) - the default,
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{* 0 = lognormal(0.5) - the default,
 * 1 = lognormal(scale),
 * 2 = cauchy(scale),
-* 3 = normal(scale)}
+* 3 = normal(scale)
+}\if{html}{\out{</div>}}}
 
 \item{scale}{The scale of the hyper prior for the sigma parameter}
-
-\item{dir}{The direcotry to store the cmdstanr files (compiled model and samples)}
 
 \item{...}{Extra parameters to be passed to the MCMC algorithm (cmdstanr)}
 }
 \value{
-A BBT model. The model contains
-* a fit object from cmdstanr
-* the wintable generated from the data
-* whether the Davidson model was used
-* whether the log_likelihood was computed
+A BBT model. The model contains:
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{   - `model`: a fit object from cmdstanr
+   - `wintable`: the wintable generated from the data
+   - `davidson` whether the Davidson model was used
+}\if{html}{\out{</div>}}
 }
 \description{
 Generates a BBT model from a table with the results of algorithms on
@@ -83,11 +79,13 @@ different data sets
 }
 \examples{
 \donttest{
-ss <- ll[1:80, 1:6] # first 20 datasets and 5 algorithms
+ss <- ll[1:80, 1:6] # first 20 data sets and 5 algorithms
+
+options(mc.cores = parallel::detectCores(logical = FALSE))
 
 m1 <- bbtcomp(ss)
 m2 <- bbtcomp(ss, lrope = FALSE, iter_sampling = 2000, seed = 1234)
-m3 <- bbtcomp(ss, lrope_value = 0.2, paired = FALSE, use_log_lik = TRUE)
+m3 <- bbtcomp(ss, lrope_value = 0.2, paired = FALSE)
 m4 <- bbtcomp(ss, deal_with_ties = "davidson", hyper_prior = 3, scale = 3.0)
 
 }

@@ -10,10 +10,10 @@
 #' \donttest{
 #' m1 = bbtcomp(ll, lrope = FALSE, deal_with_ties = "davidson")
 #' m2 = bbtcomp(ll,  deal_with_ties = "spread")
-#' ppc_summary(m1)
-#' ppc_summary(m2)
+#' table_ppc(m1)
+#' table_ppc(m2)
 #' }
-ppc_summary <- function(modout) {
+table_ppc <- function(modout) {
 
   testit::assert("modout must be a BBT model",
                  is_bbt_model(modout))

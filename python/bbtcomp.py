@@ -112,7 +112,7 @@ def bbtcomp(dat,
     
     w = makewintable(dat, datasd, dbcol, lrope, paired, lrope_value,
                      deal_with_ties)
-    mod = mcmcbbt(w, use_davidson, **kwargs)                 )
+    mod = mcmcbbt(w, use_davidson, **kwargs)
     return mod
 
 
@@ -196,14 +196,16 @@ def proc_ties(out, deal_with_ties):
     if deal_with_ties == "d":
         return out
     if deal_with_ties == "a":
-        newout = out[:, 0:4]
+        newout = out[:, 0:5]
         newout[:, 2] += out[:, 4]
         newout[:, 3] += out[:, 4]
+        newout[:, 4] = 0
         return newout
     if deal_with_ties == "s":
-        newout = out[:, 0:4]
+        newout = out[:, 0:5]
         newout[:, 2] += np.ceil(out[:, 4]/2).astype(int)
         newout[:, 3] += np.ceil(out[:, 4]/2).astype(int)
+        newout[:, 4] = 0
         return newout
 
 #
@@ -225,6 +227,10 @@ def mcmcbbt(win, use_davidson=False, **kwargs):
     mod_file = "./bbt-full.stan"
     data.update(dict(use_davidson=int(use_davidson),
                          ties=tab[:, 4]))
+    data.update(dict(
+        hyp=kwargs.get("hyp", 0.0),
+        scale=kwargs.get("scale", 0.5),
+    ))
 
     mod = cmdstanpy.CmdStanModel(stan_file=mod_file)
     fit = mod.sample(data=data, **kwargs)

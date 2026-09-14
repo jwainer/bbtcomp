@@ -60,10 +60,10 @@ message if CmdStan is missing.
 
 ### Python
 
-Install `bbtcomp` from this repository's `bbtcomp_python/` subdirectory:
+Install `bbtcomp` from PyPI:
 
 ```bash
-pip install "git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+pip install bbtcomp
 ```
 
 Optional extras -- pick these based on which extra functions you plan to
@@ -71,11 +71,15 @@ use, since each pulls in an additional dependency that plain `bbtcomp`
 doesn't need:
 
 ```bash
-# adds matplotlib, needed only if you'll call plot_pwin() / plot_ppc()
-pip install "bbtcomp[plots] @ git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+pip install "bbtcomp[plots]"  # adds matplotlib, needed only for plot_pwin() / plot_ppc()
+pip install "bbtcomp[waic]"   # adds arviz, needed only for get_waic() / get_loo()
+```
 
-# adds arviz, needed only if you'll call get_waic() / get_loo()
-pip install "bbtcomp[waic] @ git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+To install the latest development version straight from this repository
+instead (e.g. to try an unreleased fix), use:
+
+```bash
+pip install "git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
 ```
 
 If you don't yet know whether you'll need the plots or model-comparison

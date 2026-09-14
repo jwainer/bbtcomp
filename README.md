@@ -1,613 +1,751 @@
-# A Bayesian Bradley Terry model to compare multiple algorithms on multiple data sets
+# bbtcomp: a Bayesian Bradley-Terry model to compare multiple algorithms on multiple data sets
+
+`bbtcomp` fits a Bayesian Bradley-Terry (BBT) model to compare multiple
+algorithms (or methods, or configurations) across multiple data sets, using
+any performance metric (accuracy, F1, AUC, RMSE, ...). See the accompanying
+paper for the statistical background (the BBT model, the region of practical
+equivalence -- ROPE -- and "local ROPE").
+
+This repository contains two independent, feature-equivalent
+implementations:
+
+- **R**, in [`bbtcomp_R/`](bbtcomp_R/) -- the original implementation.
+- **Python**, in [`bbtcomp_python/`](bbtcomp_python/) -- a port with the same
+  functions, arguments, and behavior.
+
+Both wrap [Stan](https://mc-stan.org/) (via `cmdstanr` in R, `cmdstanpy` in
+Python) to fit the model, and both need CmdStan installed separately (see
+below). Pick whichever language you work in; this page installs both and
+walks through the same tutorial in parallel, R on the left, the equivalent
+Python on the right.
 
 ## Installation
 
-The `bbtcomp` package require the `cmdstanR` package, which is not in
-CRAN. So you need to install `cmdstanR` manually, following the steps
-described in <https://mc-stan.org/cmdstanr/>.
+Both languages follow the same two-step pattern: install the `bbtcomp`
+package itself first (which pulls in `cmdstanr`/`cmdstanpy` as an ordinary
+dependency), then install CmdStan -- the compiled Stan backend that actually
+runs the sampler. CmdStan is not an R or Python package, so `remotes`/`pip`
+have no way to install or verify it as part of installing `bbtcomp`; that
+last step is a separate, explicit call you make yourself, and `bbtcomp`
+tells you exactly when and how to make it.
 
-After `cmdstanR` is installed, install `bbtcomp` by issuing
+### R
 
-    # install.packages("remotes")
-    remotes::install_github("jwainer/bbtcomp")
+Install `bbtcomp` from this repository's `bbtcomp_R/` subdirectory:
+
+```r
+# install.packages("remotes")
+remotes::install_github("jwainer/bbtcomp", subdir = "bbtcomp_R")
+```
+
+This also installs the `cmdstanr` R package. Then check whether CmdStan
+itself is set up:
+
+```r
+check_setup()
+# CmdStan found at: /path/to/cmdstan-x.y.z
+```
+
+If CmdStan isn't found yet, `check_setup()` prints (or, with
+`check_setup(raise_on_error = TRUE)`, stops with) instructions -- in short,
+run:
+
+```r
+cmdstanr::install_cmdstan()
+```
+
+which downloads and compiles CmdStan for you. `bbtcomp()` / `mcmcbbt()` also
+run the `check_setup()` check automatically and fail fast with the same
+message if CmdStan is missing.
+
+### Python
+
+Install `bbtcomp` from this repository's `bbtcomp_python/` subdirectory:
+
+```bash
+pip install "git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+```
+
+Optional extras -- pick these based on which extra functions you plan to
+use, since each pulls in an additional dependency that plain `bbtcomp`
+doesn't need:
+
+```bash
+# adds matplotlib, needed only if you'll call plot_pwin() / plot_ppc()
+pip install "bbtcomp[plots] @ git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+
+# adds arviz, needed only if you'll call get_waic() / get_loo()
+pip install "bbtcomp[waic] @ git+https://github.com/jwainer/bbtcomp.git#subdirectory=bbtcomp_python"
+```
+
+If you don't yet know whether you'll need the plots or model-comparison
+functions, the plain `pip install bbtcomp` above is enough to get started --
+`table_pwin()`, `table_ppc()`, and the rest of the tutorial below all work
+without either extra; you can always install an extra later when you reach
+the section that needs it.
+
+This also installs the `cmdstanpy` Python package. Then check whether
+CmdStan itself is set up:
+
+```python
+from bbtcomp import check_setup
+
+check_setup()
+# CmdStan found at: /path/to/cmdstan-x.y.z
+```
+
+If CmdStan isn't found yet, `check_setup()` prints (or, with
+`check_setup(raise_on_error=True)`, raises) instructions -- in short, run:
+
+```python
+import cmdstanpy
+
+cmdstanpy.install_cmdstan()
+```
+
+which downloads and compiles CmdStan for you. `bbtcomp()` / `mcmcbbt()` also
+run the `check_setup()` check automatically and fail fast with the same
+message if CmdStan is missing.
 
 ## Data format
 
-In general terms, data is organized as a data frame where the rows are
-the data sets and the columns are the algorithms. The column names will
-be used as the names of the algorithms being compared.
+In general terms, data is organized as a table where the rows are the data
+sets and the columns are the algorithms. The column names are used as the
+names of the algorithms being compared.
 
-There may be a column that does not contain the results of an algorithm
-in the data sets, but contain an id for each data set. This is called
+There may be a column that does not contain the results of an algorithm in
+the data sets, but instead contains an id for each data set. This is called
 the `dbcol`.
 
-In more details, the data may be:
+In more detail, the data may be:
 
--   a data frame or an array, with no `dbcol`. The column names are the
-    names of the algorithms, and the entry in line *i* and column *j* is
-    the measure of some metric of algorithm *j* on the data set *i*.
-    Usually, the measure is a mean of different evaluations on different
-    test sets.
+- a table with no `dbcol`. The column names are the names of the algorithms,
+  and the entry in row *i* and column *j* is the measure of some metric of
+  algorithm *j* on the data set *i*. Usually, the measure is a mean of
+  different evaluations on different test sets.
+- a table with a `dbcol` -- a column with a string value that identifies the
+  data set name. This allows multiple rows per data set (one per
+  cross-validation fold), which enables the "local ROPE" (below).
+- two tables, with the same column names in both: the first containing the
+  mean (across the cross-validation folds) of the measure for each algorithm
+  and data set, and the second, the standard deviation of the measures
+  (across the same folds). In this case the algorithm can compute the
+  non-paired version of the local ROPE.
 
--   a data frame with a `dbcol` - a column with a string value that
-    identifies the data set name.
+Higher values must mean "better" (accuracy, AUC, F1, ...); negate error-like
+metrics (RMSE, MAE, ...) first. If the algorithm did not run for that fold,
+or for that data set, the entry should be missing (`NA` in R, `NaN` in
+Python).
 
--   two matrices, where the column name is the same on both, and where
-    the first matrix contain the mean (across the cross validation) of
-    the measure for each algorithm for each data set, and the second
-    matrix, the standard deviation of the measures (across the cross
-    validation). In this case the algorithm can compute the non-paired
-    version of the local ROPE.
+The package bundles the `ll` data set used in the paper: several classifiers
+compared on 132 data sets (4 folds each).
 
-The algorithm assumes that the higher the value for the metric the
-better, as it is with accuracy, AUC, F1 and other metrics. But if the
-metric refer to an error measure, such as RMSE, MAE, and others, the
-user should multiply these values by -1 (and therefore higher values -
-negative but close to 0 - will be better). If the algorithm did not run
-for that fold, or for that data set, the entry should be `NA`.
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-The `bbtcomp` package comes with a data set of the comparison of 17
-algorithms on 132 data sets (as described in the paper). The data set is
-called `ll`
+```r
+ll[1:8, ]
+```
 
-    ll[1:8,]
+</td><td>
 
-    ##                       db      lgbm       svm        rf        dt       knn
-    ## 1 analcatdata_authorship 0.9952607 1.0000000 0.9952607 0.9478673 0.9952607
-    ## 2 analcatdata_authorship 0.9857143 0.9952381 0.9809524 0.8761905 0.9952381
-    ## 3 analcatdata_authorship 0.9904762 1.0000000 0.9904762 0.9523810 0.9904762
-    ## 4 analcatdata_authorship 0.9809524 0.9904762 0.9809524 0.9047619 1.0000000
-    ## 5    analcatdata_boxing1 0.5000000 0.5666667 0.6666667 0.7666667 0.6333333
-    ## 6    analcatdata_boxing1 0.6666667 0.6666667 0.7666667 0.8666667 0.7666667
-    ## 7    analcatdata_boxing1 0.6666667 0.6333333 0.7666667 0.8000000 0.6333333
-    ## 8    analcatdata_boxing1 0.6666667 0.6333333 0.7000000 0.7666667 0.7666667
-    ##         xgb       xrf      svml        lr     ridge   passive       lda
-    ## 1 0.9952607 0.9810427 0.9905213 0.9952607 0.9952607 0.9905213 0.9952607
-    ## 2 0.9857143 0.9809524 0.9952381 0.9952381 0.9952381 0.9952381 0.9952381
-    ## 3 0.9761905 0.9714286 0.9952381 1.0000000 1.0000000 0.9952381 0.9904762
-    ## 4 0.9809524 0.9666667 1.0000000 1.0000000 1.0000000 1.0000000 1.0000000
-    ## 5 0.8333333 0.7333333 0.5333333 0.5333333 0.5000000 0.6333333 0.5000000
-    ## 6 0.9000000 0.8666667 0.7666667 0.7333333 0.7666667 0.6666667 0.7666667
-    ## 7 0.7666667 0.8000000 0.7000000 0.6333333 0.6666667 0.6333333 0.7000000
-    ## 8 0.7666667 0.7666667 0.7000000 0.6666667 0.7000000 0.6333333 0.7000000
-    ##         qda        nb       gbm       mlp
-    ## 1 0.9194313 0.9857820 0.9952607 1.0000000
-    ## 2 0.8952381 0.9857143 0.9857143 0.9904762
-    ## 3 0.9095238 0.9857143 0.9809524 0.9952381
-    ## 4 0.9047619 0.9904762 0.9714286 1.0000000
-    ## 5 0.6000000 0.6000000 0.8666667 0.6666667
-    ## 6 0.8000000 0.8000000 0.8666667 0.8000000
-    ## 7 0.7333333 0.7666667 0.8000000 0.8000000
-    ## 8 0.7000000 0.7000000 0.7666667 0.6666667
+```python
+from bbtcomp import load_ll
 
-Let us use a smaller sub-data set
+ll = load_ll()
+ll.iloc[0:8]
+```
 
-    ss <- ll[1:80, 1:6] # first 20 data sets (4 folds each)  and 5 algorithms
-    ss
+</td></tr>
+</table>
 
-    ##                         db      lgbm       svm        rf        dt       knn
-    ## 1   analcatdata_authorship 0.9952607 1.0000000 0.9952607 0.9478673 0.9952607
-    ## 2   analcatdata_authorship 0.9857143 0.9952381 0.9809524 0.8761905 0.9952381
-    ## 3   analcatdata_authorship 0.9904762 1.0000000 0.9904762 0.9523810 0.9904762
-    ## 4   analcatdata_authorship 0.9809524 0.9904762 0.9809524 0.9047619 1.0000000
-    ## 5      analcatdata_boxing1 0.5000000 0.5666667 0.6666667 0.7666667 0.6333333
-    ## 6      analcatdata_boxing1 0.6666667 0.6666667 0.7666667 0.8666667 0.7666667
-    ## 7      analcatdata_boxing1 0.6666667 0.6333333 0.7666667 0.8000000 0.6333333
-    ## 8      analcatdata_boxing1 0.6666667 0.6333333 0.7000000 0.7666667 0.7666667
-    ## 9      analcatdata_boxing2 0.7575758 0.7878788 0.6666667 0.6969697 0.7272727
-    ## 10     analcatdata_boxing2 0.7575758 0.6969697 0.6969697 0.6969697 0.5757576
-    ## 11     analcatdata_boxing2 0.7575758 0.6060606 0.5757576 0.5757576 0.5757576
-    ## 12     analcatdata_boxing2 0.8787879 0.7575758 0.6969697 0.7272727 0.6363636
-    ## 13 analcatdata_creditscore 1.0000000 0.8400000 0.9200000 1.0000000 0.8800000
-    ## 14 analcatdata_creditscore 0.9600000 0.7200000 0.9600000 0.9600000 0.7600000
-    ## 15 analcatdata_creditscore 1.0000000 0.9200000 1.0000000 0.9600000 0.8400000
-    ## 16 analcatdata_creditscore 1.0000000 0.7200000 0.9600000 1.0000000 0.7200000
-    ## 17        analcatdata_dmft 0.1950000 0.1900000 0.1700000 0.1450000 0.1900000
-    ## 18        analcatdata_dmft 0.1658291 0.2311558 0.1557789 0.1507538 0.1809045
-    ## 19        analcatdata_dmft 0.2160804 0.2412060 0.2010050 0.2311558 0.2261307
-    ## 20        analcatdata_dmft 0.1758794 0.2160804 0.1608040 0.1407035 0.1909548
-    ## 21   analcatdata_germangss 0.3800000 0.2200000 0.2300000 0.3100000 0.1900000
-    ## 22   analcatdata_germangss 0.3600000 0.2300000 0.2500000 0.3600000 0.2500000
-    ## 23   analcatdata_germangss 0.4100000 0.2200000 0.3000000 0.3800000 0.2300000
-    ## 24   analcatdata_germangss 0.3800000 0.2300000 0.2500000 0.2900000 0.2700000
-    ## 25     analcatdata_lawsuit 0.9848485 0.9848485 0.9848485 0.9848485 0.9696970
-    ## 26     analcatdata_lawsuit 0.9848485 0.9545455 0.9848485 0.9848485 0.9545455
-    ## 27     analcatdata_lawsuit 0.9848485 0.9393939 0.9848485 0.9848485 0.9545455
-    ## 28     analcatdata_lawsuit 0.9696970 0.9696970 0.9696970 0.9545455 0.9848485
-    ## 29            appendicitis 0.8518519 0.8518519 0.8518519 0.8148148 0.8518519
-    ## 30            appendicitis 0.8518519 0.8518519 0.8148148 0.7777778 0.8518519
-    ## 31            appendicitis 0.8846154 0.9230769 0.9230769 0.7307692 0.8846154
-    ## 32            appendicitis 0.8846154 0.8461538 0.9230769 0.8076923 0.8846154
-    ## 33              australian 0.8497110 0.8728324 0.8728324 0.8497110 0.8497110
-    ## 34              australian 0.8265896 0.8150289 0.8497110 0.7745665 0.8208092
-    ## 35              australian 0.9011628 0.8779070 0.8953488 0.8197674 0.8662791
-    ## 36              australian 0.8779070 0.8720930 0.9011628 0.8255814 0.8546512
-    ## 37                    auto 0.8431373 0.5882353 0.8235294 0.7450980 0.5098039
-    ## 38                    auto 0.7843137 0.7058824 0.7647059 0.7450980 0.7058824
-    ## 39                    auto 0.7400000 0.6600000 0.8200000 0.7000000 0.6400000
-    ## 40                    auto 0.9200000 0.6800000 0.8400000 0.9000000 0.5400000
-    ## 41                backache 0.8222222 0.8666667 0.8666667 0.7555556 0.8444444
-    ## 42                backache 0.8666667 0.8666667 0.8888889 0.8444444 0.8666667
-    ## 43                backache 0.8888889 0.8666667 0.8666667 0.7777778 0.8444444
-    ## 44                backache 0.8222222 0.8444444 0.8444444 0.7777778 0.8444444
-    ## 45           balance_scale 0.8343949 0.9108280 0.8025478 0.7834395 0.8598726
-    ## 46           balance_scale 0.9102564 0.8974359 0.8141026 0.7820513 0.8397436
-    ## 47           balance_scale 0.8653846 0.9038462 0.8525641 0.7692308 0.8333333
-    ## 48           balance_scale 0.8717949 0.9038462 0.8589744 0.7884615 0.8717949
-    ## 49                  biomed 0.8301887 0.7924528 0.8301887 0.8113208 0.7735849
-    ## 50                  biomed 0.8269231 0.8653846 0.8846154 0.7692308 0.8269231
-    ## 51                  biomed 0.9230769 0.9423077 0.9230769 0.8461538 0.9423077
-    ## 52                  biomed 0.9230769 0.9423077 0.9423077 0.9230769 0.9615385
-    ## 53                  breast 0.9600000 0.9600000 0.9600000 0.9542857 0.9485714
-    ## 54                  breast 0.9657143 0.9542857 0.9714286 0.9371429 0.9485714
-    ## 55                  breast 0.9542857 0.9600000 0.9428571 0.9085714 0.9485714
-    ## 56                  breast 0.9770115 0.9540230 0.9712644 0.9252874 0.9540230
-    ## 57           breast_cancer 0.8194444 0.7361111 0.7777778 0.6805556 0.7222222
-    ## 58           breast_cancer 0.7638889 0.7638889 0.7361111 0.6527778 0.7638889
-    ## 59           breast_cancer 0.6901408 0.6619718 0.7323944 0.6760563 0.6760563
-    ## 60           breast_cancer 0.6901408 0.7042254 0.7042254 0.5492958 0.6901408
-    ## 61 breast_cancer_wisconsin 0.9860140 0.9720280 0.9720280 0.9300699 0.9860140
-    ## 62 breast_cancer_wisconsin 0.9084507 0.9577465 0.9154930 0.8661972 0.9366197
-    ## 63 breast_cancer_wisconsin 0.9718310 0.9788732 0.9507042 0.9014085 0.9647887
-    ## 64 breast_cancer_wisconsin 0.9788732 0.9859155 0.9577465 0.9507042 0.9577465
-    ## 65                breast_w 0.9542857 0.9542857 0.9714286 0.9542857 0.9771429
-    ## 66                breast_w 0.9542857 0.9600000 0.9600000 0.9371429 0.9600000
-    ## 67                breast_w 0.9714286 0.9600000 0.9714286 0.9314286 0.9600000
-    ## 68                breast_w 0.9655172 0.9712644 0.9712644 0.9367816 0.9712644
-    ## 69                buggyCrx 0.8612717 0.8554913 0.8786127 0.7976879 0.8554913
-    ## 70                buggyCrx 0.8959538 0.8843931 0.8786127 0.8323699 0.8728324
-    ## 71                buggyCrx 0.8430233 0.8430233 0.8546512 0.7674419 0.8430233
-    ## 72                buggyCrx 0.8662791 0.8604651 0.8604651 0.7616279 0.8197674
-    ## 73                    bupa 0.5172414 0.6666667 0.6206897 0.6206897 0.6091954
-    ## 74                    bupa 0.5581395 0.6395349 0.5930233 0.6511628 0.6162791
-    ## 75                    bupa 0.5000000 0.4883721 0.5348837 0.5697674 0.5581395
-    ## 76                    bupa 0.5581395 0.5930233 0.5697674 0.5697674 0.6162791
-    ## 77             calendarDOW 0.6200000 0.3100000 0.5600000 0.5700000 0.5600000
-    ## 78             calendarDOW 0.6100000 0.3900000 0.6000000 0.5900000 0.5300000
-    ## 79             calendarDOW 0.6400000 0.4200000 0.6600000 0.6500000 0.5800000
-    ## 80             calendarDOW 0.6060606 0.3636364 0.6262626 0.5959596 0.6262626
+Let us use a smaller sub-data set:
 
-This data frame corresponds to the second type of data for the bbtcomp
-algorithm: a data frame with a column that indicates the data set, and
-potentially multiple measures for each data set (for multiples folds).
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-A data frame that corresponds to the first data format is obtained by:
+```r
+ss <- ll[1:80, 1:6]  # first 20 data sets (4 folds each) and 5 algorithms
+ss
+```
 
-    library(dplyr)
+</td><td>
 
-    ## 
-    ## Attaching package: 'dplyr'
+```python
+ss = ll.iloc[0:80, 0:6]  # first 20 data sets (4 folds each), 5 algorithms
+ss
+```
 
-    ## The following objects are masked from 'package:stats':
-    ## 
-    ##     filter, lag
+</td></tr>
+</table>
 
-    ## The following objects are masked from 'package:base':
-    ## 
-    ##     intersect, setdiff, setequal, union
+This corresponds to the second type of data for `bbtcomp`: a table with a
+column that indicates the data set (`dbcol`), and potentially multiple
+measures for each data set (for multiple folds).
 
-    ssmean <- ll %>% group_by(db) %>% summarize(across(everything(),.fns = mean))
-    ssmean <- ssmean[,-1]
-    ssmean
+A table that corresponds to the first data format is obtained by averaging
+over folds. In R:
 
-    ## # A tibble: 132 × 16
-    ##     lgbm   svm    rf    dt   knn   xgb   xrf  svml    lr ridge passive   lda
-    ##    <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl> <dbl>   <dbl> <dbl>
-    ##  1 0.612 0.559 0.574 0.531 0.542 0.604 0.565 0.509 0.51  0.509   0.499 0.51 
-    ##  2 0.554 0.514 0.559 0.524 0.533 0.579 0.539 0.513 0.512 0.513   0.505 0.514
-    ##  3 0.718 0.624 0.646 0.577 0.556 0.712 0.649 0.498 0.501 0.499   0.492 0.498
-    ##  4 0.658 0.636 0.622 0.559 0.562 0.642 0.643 0.484 0.484 0.485   0.505 0.484
-    ##  5 0.685 0.614 0.638 0.547 0.551 0.659 0.629 0.499 0.499 0.501   0.507 0.499
-    ##  6 0.555 0.515 0.550 0.551 0.525 0.542 0.525 0.729 0.692 0.698   0.574 0.680
-    ##  7 0.573 0.515 0.585 0.575 0.559 0.603 0.536 0.703 0.661 0.669   0.587 0.677
-    ##  8 1     0.989 1     1     0.998 1     0.997 0.949 0.950 0.944   0.935 0.944
-    ##  9 0.973 0.957 0.974 0.964 0.965 0.972 0.973 0.936 0.962 0.962   0.959 0.964
-    ## 10 0.989 0.973 0.981 0.977 0.976 0.987 0.982 0.973 0.974 0.973   0.972 0.951
-    ## # ℹ 122 more rows
-    ## # ℹ 4 more variables: qda <dbl>, nb <dbl>, gbm <dbl>, mlp <dbl>
+```r
+library(dplyr)
 
-The data is only a single measure for each algoritm (column) and for
-each data set (implicitly each row). This format does not allow one to
-use local ROPE (discussed below).
+ssmean <- ss %>% group_by(db) %>% summarize(across(everything(), .fns = mean))
+ssmean <- ssmean[, -1]
+ssmean
+```
 
-Finally the third format is a pair of data frames, one with the mean
-measure for each data set and algorithm (the `ssmean` data frame above),
-and one with the standard deviation of the measures. The second data
-frame can be computed by:
+and the equivalent in Python:
 
-    sssd <- ll %>% group_by(db) %>% summarize(across(everything(),.fns = sd))
-    sssd <- sssd[,-1]
-    sssd
+```python
+ssmean = ss.groupby("db").mean().reset_index(drop=True)
+```
 
-    ## # A tibble: 132 × 16
-    ##       lgbm      svm      rf      dt     knn     xgb     xrf     svml      lr
-    ##      <dbl>    <dbl>   <dbl>   <dbl>   <dbl>   <dbl>   <dbl>    <dbl>   <dbl>
-    ##  1 0.0244  0.0259   0.0250  0.0279  0.0174  0.0217  0.0195  0.0155   0.0157 
-    ##  2 0.00921 0.0307   0.0333  0.0373  0.0209  0.0259  0.0295  0.0174   0.0154 
-    ##  3 0.0151  0.0190   0.0179  0.0327  0.0454  0.0227  0.102   0.00826  0.0113 
-    ##  4 0.0144  0.0178   0.0386  0.0283  0.0394  0.0195  0.00289 0.0273   0.0259 
-    ##  5 0.0256  0.0236   0.0164  0.0159  0.0134  0.00777 0.0286  0.00315  0.00433
-    ##  6 0.0337  0.0170   0.0182  0.0322  0.0273  0.0216  0.0135  0.0169   0.0102 
-    ##  7 0.0357  0.0219   0.0202  0.0343  0.0240  0.0376  0.0296  0.0155   0.0224 
-    ##  8 0       0.00249  0       0       0.00206 0       0.00244 0.00835  0.00261
-    ##  9 0.00429 0.000530 0.00265 0.00508 0.00377 0.00401 0.00410 0.0474   0.00184
-    ## 10 0.00329 0.000526 0.00252 0.00274 0.00235 0.00184 0.00150 0.000866 0.00219
-    ## # ℹ 122 more rows
-    ## # ℹ 7 more variables: ridge <dbl>, passive <dbl>, lda <dbl>, qda <dbl>,
-    ## #   nb <dbl>, gbm <dbl>, mlp <dbl>
+This data has only a single measure per algorithm (column) and per data set
+(each row, implicitly). This format does not allow one to use the local
+ROPE (discussed below).
+
+Finally, the third format is a pair of tables, one with the mean measure for
+each data set and algorithm (the `ssmean` table above), and one with the
+standard deviation of the measures. In R:
+
+```r
+sssd <- ss %>% group_by(db) %>% summarize(across(everything(), .fns = sd))
+sssd <- sssd[, -1]
+```
+
+and in Python:
+
+```python
+sssd = ss.groupby("db").std().reset_index(drop=True)
+```
 
 ## Before you start using bbtcomp
 
 ### Running chains in parallel
 
-First, to run the chains in parallel:
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    options(mc.cores = parallel::detectCores(logical = FALSE))
+By default `cmdstanr` runs the chains sequentially unless told otherwise:
 
-If when running the bbtcomp you see the message
+```r
+options(mc.cores = parallel::detectCores(logical = FALSE))
+```
 
-    Running MCMC with 4 sequential chains...
+If, when running `bbtcomp`, you see the message `Running MCMC with 4
+sequential chains...` (the key word is **sequential**), it is because you
+did not set up Stan to run the chains in parallel with the `options` command
+above.
 
-(the key word there is **sequential**) it is because you did not set up
-Stan to run the chains in parallel with the `options` command above.
+</td><td>
+
+By default `cmdstanpy`'s `CmdStanModel.sample()` already defaults
+`parallel_chains` to the number of CPUs, so no setup is normally needed. To
+control it explicitly, pass `parallel_chains` (and `chains`) directly:
+
+```python
+x = bbtcomp(ss, parallel_chains=4)
+```
+
+</td></tr>
+</table>
 
 ### Auxiliary folder
 
-CmdStan which serve as the interface between bbtcomp and Stan (the MCMC
-under the hood of bbtcomp) uses files as intemerdiary between the two
-processes. First, the Bayesian model of BBT is translated into C++ and
-then compiled and saved into a file. And the sampling process saves the
-results as .csv files (one per chain). All these files are stored in an
+CmdStan, which serves as the interface between `bbtcomp` and Stan (the MCMC
+engine under the hood of `bbtcomp`), uses files as an intermediary between
+the two processes. First, the Bayesian model of BBT is translated into C++
+and then compiled and saved into a file. The sampling process then saves the
+results as `.csv` files (one per chain). All these files are stored in an
 auxiliary folder.
 
-This auxiliary folder can be set using
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    options(bbtcomp.dir = "~/.bbtcomp")
+This auxiliary folder can be set for the whole R session using:
 
-In this case the auxiliary folder is “~/.bbtcomp”. If the folder is not
-set, than bbtcomp will use a temporary folder which will be deleted as
-soon as the R session is terminated.
+```r
+options(bbtcomp.dir = "~/.bbtcomp")
+```
 
-The advantage of setting the auxiliary folder with the `options` is that
-the compiled Stan program is stored there and there will be no need to
-compile it in another R session using bbtcomp. The disadvantage is that
-each call to `bbtcomp` will generate 4 .csv files. The user should erase
-all these .csv from time to time.
+If the folder is not set, `bbtcomp` will use a temporary folder that will be
+deleted as soon as the R session is terminated.
 
-The advantages and disadvantages of using a temporary folder are the
-opposite of the fixed auxiliary folder: new compilation of the Stan
-model will be necessary in each time `bbtcomp` is called in a new R
-session, but there is no need to delete the .csv files from time to
-time.
+</td><td>
+
+Python has no equivalent of R's `options()` -- there is no global settings
+registry -- so the direct translation is a plain package-level variable,
+`bbtcomp.DEFAULT_OUTPUT_DIR`, which every call that omits `output_dir` falls
+back to:
+
+```python
+import bbtcomp
+
+bbtcomp.DEFAULT_OUTPUT_DIR = "~/.bbtcomp"
+
+x = bbtcomp.bbtcomp(ss)  # reuses ~/.bbtcomp, no output_dir needed
+```
+
+An explicit `output_dir=...` on a given call always takes precedence; if
+neither is set, a fresh temporary directory is used.
+
+</td></tr>
+</table>
+
+The advantage of setting the auxiliary folder is that the compiled Stan
+program is stored there and there is no need to compile it again in another
+session. The disadvantage is that each call generates 4 `.csv` files, and
+the user should erase these `.csv` files from time to time. Leaving it unset
+has the opposite trade-off: a new compilation each session, but nothing to
+clean up.
 
 ## Basic use
 
-Basic bbtcomp operation:
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    x <- bbtcomp(ss)
+```r
+x <- bbtcomp(ss)
+```
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.1 seconds.
-    ## Chain 2 finished in 0.1 seconds.
-    ## Chain 3 finished in 0.1 seconds.
-    ## Chain 4 finished in 0.1 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.1 seconds.
-    ## Total execution time: 0.3 seconds.
+```
+## Running MCMC with 4 parallel chains...
+##
+## Chain 1 finished in 0.1 seconds.
+## Chain 2 finished in 0.1 seconds.
+## Chain 3 finished in 0.1 seconds.
+## Chain 4 finished in 0.1 seconds.
+##
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.1 seconds.
+## Total execution time: 0.3 seconds.
+```
 
-will return a `bbt model` which is a list with 3 components that
-contains:
+</td><td>
 
--   a `cmdstanr` fit model (with the samples)
+```python
+from bbtcomp import bbtcomp, table_pwin, table_ppc, table_wintable, plot_pwin, plot_ppc
 
--   a wintable
+x = bbtcomp(ss)
+```
 
--   a Boolean stating whether the Davidson model was used
+*(output not shown -- `cmdstanpy` prints its own progress log)*
+
+</td></tr>
+</table>
+
+`bbtcomp()`/`bbtcomp` returns a BBT model, a list/object with three
+components: a fitted Stan model (with the samples), a wintable, and a flag
+stating whether the Davidson model was used.
 
 Let us plot the results:
 
-    plot_pwin(x)
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-![](README_files/figure-markdown_strict/y2-1.png)
+```r
+plot_pwin(x)
+```
+
+![](bbtcomp_R/README_files/figure-markdown_strict/y2-1.png)
+
+</td><td>
+
+```python
+plot_pwin(x)
+```
+
+</td></tr>
+</table>
 
 Let us see the results as a table:
 
-    table_pwin(x)
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    ##          pair mean delta above.50 in.rope
-    ## 1   lgbm > rf 0.53  0.22     0.66    0.49
-    ## 2  lgbm > svm 0.62  0.21     0.96    0.16
-    ## 3  lgbm > knn 0.68  0.19     1.00    0.02
-    ## 4   lgbm > dt 0.79  0.16     1.00    0.00
-    ## 5    rf > svm 0.59  0.22     0.90    0.26
-    ## 6    rf > knn 0.66  0.20     0.99    0.05
-    ## 7     rf > dt 0.77  0.17     1.00    0.00
-    ## 8   svm > knn 0.57  0.22     0.85    0.33
-    ## 9    svm > dt 0.69  0.20     1.00    0.02
-    ## 10   knn > dt 0.63  0.22     0.97    0.11
+```r
+table_pwin(x)
+```
 
-Or only the comparisons of the `rf` algorithms with the others
+```
+##          pair mean delta above.50 in.rope
+## 1   lgbm > rf 0.53  0.22     0.66    0.49
+## 2  lgbm > svm 0.62  0.21     0.96    0.16
+## 3  lgbm > knn 0.68  0.19     1.00    0.02
+## 4   lgbm > dt 0.79  0.16     1.00    0.00
+## 5    rf > svm 0.59  0.22     0.90    0.26
+## 6    rf > knn 0.66  0.20     0.99    0.05
+## 7     rf > dt 0.77  0.17     1.00    0.00
+## 8   svm > knn 0.57  0.22     0.85    0.33
+## 9    svm > dt 0.69  0.20     1.00    0.02
+## 10   knn > dt 0.63  0.22     0.97    0.11
+```
 
-    table_pwin(x,control='rf')
+</td><td>
 
-    ##        pair mean delta above.50 in.rope
-    ## 1 lgbm > rf 0.53  0.22     0.66    0.49
-    ## 2  rf > svm 0.59  0.22     0.90    0.26
-    ## 3  rf > knn 0.66  0.20     0.99    0.05
-    ## 4   rf > dt 0.77  0.17     1.00    0.00
+```python
+table_pwin(x)
+#          pair  mean  delta  above.50  in.rope
+# 0   lgbm > rf  0.53   0.22      0.66     0.49
+# ...
+```
 
-Or other summary of the probability distributions (median, low and high
+</td></tr>
+</table>
+
+`table_pwin()` returns a data.frame (R: S3 class `"bbt_pwin_table"`; Python:
+`PwinTable`, a `pandas.DataFrame` subclass) where the two algorithm names of
+each pair are stored as separate `larger`/`smaller` columns (the printed
+`pair` column above is just those two combined for display, e.g.
+`"lgbm > rf"` means `larger = "lgbm"`, `smaller = "rf"`), so code can use
+them directly instead of parsing the printed string back apart:
+
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
+
+```r
+subset(table_pwin(x), larger == "lgbm")
+```
+
+</td><td>
+
+```python
+tp = table_pwin(x)
+tp["larger"]                        # -> a plain pandas Series
+tp[tp["larger"] == "lgbm"]          # every pair lgbm won on average
+```
+
+</td></tr>
+</table>
+
+Or only the comparisons of the `rf` algorithm with the others:
+
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
+
+```r
+table_pwin(x, control = 'rf')
+```
+
+```
+##       pair mean delta above.50 in.rope
+## 1 lgbm > rf 0.53  0.22     0.66    0.49
+## 2  rf > svm 0.59  0.22     0.90    0.26
+## 3  rf > knn 0.66  0.20     0.99    0.05
+## 4   rf > dt 0.77  0.17     1.00    0.00
+```
+
+</td><td>
+
+```python
+table_pwin(x, control="rf")
+```
+
+</td></tr>
+</table>
+
+Or other summaries of the probability distributions (median, low and high
 limits of the 95% HDI):
 
-    table_pwin(x, columns = c("median", "low", "high"), hdi=0.95)
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    ##          pair median  low high
-    ## 1   lgbm > rf   0.53 0.40 0.66
-    ## 2  lgbm > svm   0.62 0.48 0.74
-    ## 3  lgbm > knn   0.68 0.56 0.80
-    ## 4   lgbm > dt   0.79 0.69 0.89
-    ## 5    rf > svm   0.59 0.47 0.73
-    ## 6    rf > knn   0.66 0.53 0.77
-    ## 7     rf > dt   0.77 0.66 0.86
-    ## 8   svm > knn   0.57 0.43 0.70
-    ## 9    svm > dt   0.70 0.57 0.81
-    ## 10   knn > dt   0.63 0.50 0.76
+```r
+table_pwin(x, columns = c("median", "low", "high"), hdi = 0.95)
+```
 
-For the `ssmean` data format (without the dbcol), use
+</td><td>
 
-    x2 <- bbtcomp(ssmean, dbcol=0)
+```python
+table_pwin(x, columns=["median", "low", "high"], hdi_prob=0.95)
+```
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.7 seconds.
-    ## Chain 2 finished in 0.7 seconds.
-    ## Chain 4 finished in 0.7 seconds.
-    ## Chain 3 finished in 0.7 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.7 seconds.
-    ## Total execution time: 0.9 seconds.
+</td></tr>
+</table>
 
-For the `ssmean` and `ssds` data format (without the dbcol), use
+For the `ssmean` data format (without the `dbcol`), use:
 
-    x3 <- bbtcomp(ssmean, sssd)
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.6 seconds.
-    ## Chain 2 finished in 0.6 seconds.
-    ## Chain 3 finished in 0.6 seconds.
-    ## Chain 4 finished in 0.6 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.6 seconds.
-    ## Total execution time: 0.7 seconds.
+```r
+x2 <- bbtcomp(ssmean, dbcol = 0)
+```
+
+</td><td>
+
+```python
+x2 = bbtcomp(ssmean, dbcol=None)
+```
+
+</td></tr>
+</table>
+
+For the `ssmean` and `sssd` data format (mean + standard deviation, without
+the `dbcol`), use:
+
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
+
+```r
+x3 <- bbtcomp(ssmean, sssd)
+```
+
+</td><td>
+
+```python
+x3 = bbtcomp(ssmean, sssd, dbcol=None)
+```
+
+</td></tr>
+</table>
 
 ### Local ROPE
 
-Although the ss data has 4 entries for each data set, the results on 4
-different test sets (4-fold cross validation), the results displayed
-above compute the mean for each algorithm and data set and perform the
-BBT on the mean results.
+Although the `ss` data has 4 entries for each data set -- the results on 4
+different test sets (4-fold cross-validation) -- the results displayed above
+compute the mean for each algorithm and data set and perform the BBT on the
+mean results.
 
 The paper discusses that using the fold data one can convert some of the
-victories of one algorithm over another into a tie, because the
-difference of the means is smaller or much smaller than the variance of
-the results for the folds. The paper call it a local ROPE, and discusses
-two different approaches to the local ROPE, when the measures for the
-folds are paired (the same test set was measured for all algorithms) or
-not paired (each test set was potentially different for each algorithm).
+victories of one algorithm over another into a tie, because the difference
+of the means is smaller or much smaller than the variance of the results
+for the folds. The paper calls it a local ROPE, and discusses two different
+approaches to the local ROPE, when the measures for the folds are paired
+(the same test set was measured for all algorithms) or not paired (each test
+set was potentially different for each algorithm).
 
-To use the local ROPE both the paired and not-paired versions:
+To use the local ROPE, both the paired and not-paired versions:
 
-    y <- bbtcomp(ss,lrope=T, paired=T) # paired version - default 
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.1 seconds.
-    ## Chain 2 finished in 0.1 seconds.
-    ## Chain 3 finished in 0.1 seconds.
-    ## Chain 4 finished in 0.1 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.1 seconds.
-    ## Total execution time: 0.2 seconds.
+```r
+y <- bbtcomp(ss, lrope = T, paired = T)  # paired version - default
+z <- bbtcomp(ss, lrope = T, paired = F)  # not paired version
+```
 
-    z <- bbtcomp(ss,lrope=T, paired=F) # not paired version 
+</td><td>
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.1 seconds.
-    ## Chain 2 finished in 0.1 seconds.
-    ## Chain 3 finished in 0.1 seconds.
-    ## Chain 4 finished in 0.1 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.1 seconds.
-    ## Total execution time: 0.2 seconds.
+```python
+y = bbtcomp(ss, lrope=True, paired=True)   # paired version - default
+z = bbtcomp(ss, lrope=True, paired=False)  # not paired version
+```
 
-In the case of the ss data in particular, using either version of the
+</td></tr>
+</table>
+
+In the case of the `ss` data in particular, using either version of the
 local ROPE will not change the number of victories and losses into ties
 except for one pair of algorithms.
 
-For the other data formats: only the mean data `ssmean` does not allow
-the computation of the local ROPE. For the mean and standard deviation
-data (`ssmean` and `ssds`) only the non paired version of local ROPE can
-be computed.
+For the other data formats: only the mean data `ssmean` does not allow the
+computation of the local ROPE. For the mean and standard deviation data
+(`ssmean` and `sssd`) only the non-paired version of local ROPE can be
+computed.
 
 ### Convergence check
 
-Convergence check of the sampling is performed by the
-`convergence_check` function, which only calls the `cmdstan_diagnose`
-function from `cmdstan`.
+Convergence check of the sampling is performed by the `convergence_check`
+function, which only calls the `cmdstan_diagnose` function from CmdStan.
 
-`cmdstanr` uses a directory to store two important information of the
-sampling. The fist information is the compiled Stan model. The first
-time one calls `bbtcomp` the Stan model is compiled and stored in this
-directory. The directory is set by the `dir` parameter of the `bbtcomp`
-function, and the default is `.bbtcomp` on the current directory.
+By default, `bbtcomp` deletes the sampler's `.csv` files after use (they
+tend to grow large), but the convergence check needs to read them, so to run
+it you must keep them around for that call.
 
-The second data stored in the directory are the .csv files with the
-samples themselves. The default case is to run 4 chains of sampling in
-parallel, and thus the sampling process generates 4 .csv files with the
-results of the sampling. The samples themselves are part of the bbt
-model object returned by `bbtcomp` and this object is passed to the
-functions that will generate the tables and the graphs. The default for
-`bbtcomp` is to delete the .csv in the directory since they tend to grow
-(each call to `bbtcomp` generates 4 new large .csv files). But the
-convergence check performed by the `cmdstan_diagnose` function reads
-those files. Therefore, in order to perform the convergence tests one
-must disable the cleaning of the .csv files
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    y <- bbtcomp(ss) 
+```r
+y <- bbtcomp(ss)
+convergence_check(y)
+```
 
-    ## Running MCMC with 4 parallel chains...
-    ## 
-    ## Chain 1 finished in 0.1 seconds.
-    ## Chain 2 finished in 0.1 seconds.
-    ## Chain 3 finished in 0.1 seconds.
-    ## Chain 4 finished in 0.1 seconds.
-    ## 
-    ## All 4 chains finished successfully.
-    ## Mean chain execution time: 0.1 seconds.
-    ## Total execution time: 0.2 seconds.
+```
+## Processing csv files: ...
+##
+## Checking sampler transitions treedepth.
+## Treedepth satisfactory for all transitions.
+##
+## Checking sampler transitions for divergences.
+## No divergent transitions found.
+##
+## Checking E-BFMI - sampler transitions HMC potential energy.
+## E-BFMI satisfactory.
+##
+## Effective sample size satisfactory.
+##
+## Split R-hat values satisfactory all parameters.
+##
+## Processing complete, no problems detected.
+```
 
-    convergence_check(y) 
+</td><td>
 
-    ## Processing csv files: /Users/wainer/.bbtcomp/bbt-full-202308041355-1-3aaf91.csv, /Users/wainer/.bbtcomp/bbt-full-202308041355-2-3aaf91.csv, /Users/wainer/.bbtcomp/bbt-full-202308041355-3-3aaf91.csv, /Users/wainer/.bbtcomp/bbt-full-202308041355-4-3aaf91.csv
-    ## 
-    ## Checking sampler transitions treedepth.
-    ## Treedepth satisfactory for all transitions.
-    ## 
-    ## Checking sampler transitions for divergences.
-    ## No divergent transitions found.
-    ## 
-    ## Checking E-BFMI - sampler transitions HMC potential energy.
-    ## E-BFMI satisfactory.
-    ## 
-    ## Effective sample size satisfactory.
-    ## 
-    ## Split R-hat values satisfactory all parameters.
-    ## 
-    ## Processing complete, no problems detected.
+```python
+from bbtcomp import convergence_check
 
-### Posterior Predictive check
+y = bbtcomp(ss, output_dir="~/.bbtcomp")  # keep the sampler csv files
+convergence_check(y)
+```
 
-The posterior pretictive checks of the model in relation to the data,
-can be generated by
+</td></tr>
+</table>
 
-    plot_ppc(y) 
+### Posterior Predictive Check
 
-![](README_files/figure-markdown_strict/y9-1.png)
+The posterior predictive checks of the model in relation to the data can be
+generated by:
 
-And the table version if the graphs as
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    table_ppc(y) 
+```r
+plot_ppc(y)
+```
 
-    ##    hdi proportion
-    ## 1 0.50        0.8
-    ## 2 0.90        1.0
-    ## 3 0.95        1.0
-    ## 4 1.00        1.0
+![](bbtcomp_R/README_files/figure-markdown_strict/y9-1.png)
 
-### The win/losses table
+</td><td>
 
-The table of win and losses (a wintable) for all algorithms can be
-accessed as the `wintable` component of the model returned by `bbtcomp`.
-To print the table of victories and losses with the ties explicit (or
-unprocessed) use:
+```python
+plot_ppc(y)
+```
 
-    table_wintable(y$wintable, which = "pre") 
+</td></tr>
+</table>
 
-    ##    alg1 alg2 win1(pre) win2(pre) ties(pre)
-    ## 1  lgbm  svm         9         5         6
-    ## 2  lgbm   rf         7         6         7
-    ## 3  lgbm   dt        18         2         0
-    ## 4  lgbm  knn        11         5         4
-    ## 5   svm   rf         5        11         4
-    ## 6   svm   dt        13         6         1
-    ## 7   svm  knn         9         3         8
-    ## 8    rf   dt        14         4         2
-    ## 9    rf  knn        11         5         4
-    ## 10   dt  knn         6        12         2
+The table version of the same check is obtained as:
 
-To print the table with the ties processed, use
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-    table_wintable(y$wintable) 
+```r
+table_ppc(y)
+```
 
-    ##    alg1 alg2 win1 win2
-    ## 1  lgbm  svm   12    8
-    ## 2  lgbm   rf   11   10
-    ## 3  lgbm   dt   18    2
-    ## 4  lgbm  knn   13    7
-    ## 5   svm   rf    7   13
-    ## 6   svm   dt   14    7
-    ## 7   svm  knn   13    7
-    ## 8    rf   dt   15    5
-    ## 9    rf  knn   13    7
-    ## 10   dt  knn    7   13
+```
+##    hdi proportion
+## 1 0.50        0.8
+## 2 0.90        1.0
+## 3 0.95        1.0
+## 4 1.00        1.0
+```
 
-To print both side by side:
+</td><td>
 
-    table_wintable(y$wintable, which = "both") 
+```python
+table_ppc(y)
+```
 
-    ##    alg1 alg2 win1 win2 win1(pre) win2(pre) ties(pre)
-    ## 1  lgbm  svm   12    8         9         5         6
-    ## 2  lgbm   rf   11   10         7         6         7
-    ## 3  lgbm   dt   18    2        18         2         0
-    ## 4  lgbm  knn   13    7        11         5         4
-    ## 5   svm   rf    7   13         5        11         4
-    ## 6   svm   dt   14    7        13         6         1
-    ## 7   svm  knn   13    7         9         3         8
-    ## 8    rf   dt   15    5        14         4         2
-    ## 9    rf  knn   13    7        11         5         4
-    ## 10   dt  knn    7   13         6        12         2
+</td></tr>
+</table>
 
-## Python implementation
+### The win/loss table
 
-### Installation
+The table of wins and losses (a wintable) for all algorithms can be accessed
+as the `wintable` component of the model returned by `bbtcomp`. To print the
+table of victories and losses with the ties shown explicitly (i.e.,
+unprocessed), use:
 
-The python implementation needs `cmdstanPy` package, so please install
-it following the steps described in <https://mc-stan.org/cmdstanpy/>
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-Download the files in the `python` directory to your current directory.
-The files are
+```r
+table_wintable(y$wintable, which = "pre")
+```
 
--   bbtcomp.py
--   stan-full.stan
--   ll.csv
+</td><td>
 
-`ll.csv` is the `ll` data available in the R package. If you want to
-read it use:
+```python
+table_wintable(y.wintable, which="pre")
+```
 
-    import pandas as pd
-    ll = pd.read_csv("./ll.csv")
+</td></tr>
+</table>
 
-If you do not want to use this data, there is no need to download the
-file.
+To print the table with the ties processed, use:
 
-`bbtcomp.py` and `stan-full.stan` should be in the current directory.
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-Then issue:
+```r
+table_wintable(y$wintable)
+```
 
-    import bbtcomp
+</td><td>
 
-### Using the python implementation
+```python
+table_wintable(y.wintable)
+```
 
-The python file only implements two of the R package functions
+</td></tr>
+</table>
 
--   `bbtcomp`(data)
+To print both tables side by side:
 
--   `table_pwin`(model)
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
 
-`bbtcomp` has the same parameters, data formats and so on, as the R
-counterpart. But
+```r
+table_wintable(y$wintable, which = "both")
+```
 
--   to indicate that there is no `dbcol` use `dbcol=None` or `dbcol=-1`
+</td><td>
 
--   to control the auxiliary folder, set the parameter `output_dir` to
-    the auxiliary folder. If left unset, bbtcomp will use a temporary
-    folder which will be deleted as soon as the python session is
-    terminated.
+```python
+table_wintable(y.wintable, which="both")
+```
+
+</td></tr>
+</table>
+
+### Model comparison
+
+<table>
+<tr><th>R</th><th>Python</th></tr>
+<tr><td>
+
+```r
+get_waic(y)
+get_loo(y)
+```
+
+</td><td>
+
+```python
+from bbtcomp import get_waic, get_loo
+
+get_waic(y)
+get_loo(y)
+```
+
+</td></tr>
+</table>
+
+## Further reading
+
+- [`bbtcomp_R/README.md`](bbtcomp_R/README.md) -- the full R reference, with
+  every function's output shown.
+- [`bbtcomp_python/README.md`](bbtcomp_python/README.md) -- the full Python
+  reference, including installation extras and the test suite.
+- `paper/` -- the paper describing the BBT model, ROPE, and local ROPE.

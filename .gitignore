@@ -1,2 +1,7 @@
 .Rproj.user
-README.Rmd
+.Rhistory
+.DS_Store
+bbtcomp.Rcheck/
+*.tar.gz
+_fix_text_tmp.py
+Claude outputs/

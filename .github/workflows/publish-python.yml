@@ -47,7 +47,6 @@ jobs:
     if: github.event.inputs.target == 'testpypi'
     needs: build
     runs-on: ubuntu-latest
-    environment: testpypi
     permissions:
       id-token: write  # required for trusted publishing, no token/secret needed
     steps:
@@ -65,7 +64,6 @@ jobs:
     if: github.event.inputs.target == 'pypi'
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       id-token: write  # required for trusted publishing, no token/secret needed
     steps:
